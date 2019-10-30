@@ -157,6 +157,21 @@ func (c *Conn) NetConn() net.Conn {
 	return c.sess.buf.transport.(net.Conn)
 }
 
+// Returns the TDS version of the server
+func (c *Conn) TDSVersion() uint32 {
+	return c.sess.loginAck.TDSVersion
+}
+
+// Returns the name of the server (i.e Microsoft SQL Server)
+func (c *Conn) ProgName() string {
+	return c.sess.loginAck.ProgName
+}
+
+// Returns the version of the server
+func (c *Conn) ProgVer() uint32 {
+	return c.sess.loginAck.ProgVer
+}
+
 func (c *Conn) setReturnStatus(s ReturnStatus) {
 	if c.returnStatus == nil {
 		return
