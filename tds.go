@@ -790,6 +790,11 @@ initiate_connection:
 	}
 
 	fields, err = readPrelogin(outbuf)
+	_preLoginResponseChan := ctx.Value("preLoginResponse")
+	if preLoginResponseChan, ok := _preLoginResponseChan.(chan map[uint8][]byte); ok {
+		preLoginResponseChan <- fields
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -894,12 +899,21 @@ initiate_connection:
 			case loginAckStruct:
 				success = true
 				sess.loginAck = token
+
+				_loginResponseChan := ctx.Value("loginResponseChan")
+				if loginResponseChan, ok := _loginResponseChan.(chan interface{}); ok {
+					loginResponseChan <- token
+				}
 			case error:
 				return nil, fmt.Errorf("Login error: %s", token.Error())
 			case doneStruct:
 				if token.isError() {
 					return nil, fmt.Errorf("Login error: %s", token.getError())
 				}
+
+				// contains protocol specific errors
+				token.errors
+
 				goto loginEnd
 			}
 		}
