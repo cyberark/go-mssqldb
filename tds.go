@@ -16,7 +16,7 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
-	"github.com/denisenkom/go-mssqldb/ctxtypes"
+	errs "github.com/pkg/errors"
 )
 
 func parseInstances(msg []byte) map[string]map[string]string {
@@ -156,16 +156,21 @@ func (p KeySlice) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }
 
 // http://msdn.microsoft.com/en-us/library/dd357559.aspx
 func writePrelogin(w *TdsBuffer, fields map[uint8][]byte) error {
-	return WritePreloginWithPacketType(w, fields, PackPrelogin)
+	return writePreloginWithPacketType(w, fields, PackPrelogin)
 }
 
-// WritePreloginWithPacketType writes a prelogin packet with a specific packet type
+// WritePreloginReply writes the prelogin reply to a buffer
+func WritePreloginReply(w io.ReadWriteCloser, fields map[uint8][]byte) error {
+	return writePreloginWithPacketType(w, fields, PackReply)
+}
+
+// writePreloginWithPacketType writes a prelogin packet with a specific packet type
 //
 // There are two cases in which this method is called.
 // 1. called by outside code as just a io.ReadWriteCloser
 // 2. called by internal code as *TdsBuffer
 // For (2) it's efficient to avoid reallocating the *TdsBuffer by asserting on the type of the passed in value of _w
-func WritePreloginWithPacketType(
+func writePreloginWithPacketType(
 	_w io.ReadWriteCloser,
 	fields map[uint8][]byte,
 	packetTypeValue uint8,
@@ -216,11 +221,6 @@ func WritePreloginWithPacketType(
 	return w.FinishPacket()
 }
 
-func readPrelogin(r *TdsBuffer) (map[uint8][]byte, error) {
-	return ReadPreloginWithPacketType(r, PackReply)
-}
-
-
 // https://docs.microsoft.com/en-us/sql/database-engine/configure-windows/configure-the-network-packet-size-server-configuration-option
 // Default packet size remains at 4096 bytes
 const bufferSize uint16 = 4096
@@ -236,13 +236,16 @@ func NewIdempotentDefaultTdsBuffer(transport io.ReadWriteCloser) *TdsBuffer {
 	return buffer
 }
 
-// ReadPreloginWithPacketType reads a prelogin packet with an expected packet type
+// readPreloginWithPacketType reads a prelogin packet with an expected packet type
 //
 // There are two cases in which this method is called.
 // 1. called by outside code as just a io.ReadWriteCloser
 // 2. called by internal code as *TdsBuffer
 // For (2) it's efficient to avoid reallocating the *TdsBuffer by asserting on the type of the passed in value of _w
-func ReadPreloginWithPacketType(_r io.ReadWriteCloser, expectedPacketTypeValue uint8) (map[uint8][]byte, error) {
+func readPreloginWithPacketType(
+	_r io.ReadWriteCloser,
+	expectedPacketTypeValue uint8,
+) (map[uint8][]byte, error) {
 	r := NewIdempotentDefaultTdsBuffer(_r)
 
 	packet_type, err := r.BeginRead()
@@ -271,6 +274,14 @@ func ReadPreloginWithPacketType(_r io.ReadWriteCloser, expectedPacketTypeValue u
 		offset += 5
 	}
 	return results, nil
+}
+
+func readPrelogin(r *TdsBuffer) (map[uint8][]byte, error) {
+	return readPreloginWithPacketType(r, PackReply)
+}
+
+func ReadPreloginRequest(r io.ReadWriteCloser) (map[uint8][]byte, error) {
+	return readPreloginWithPacketType(r, PackPrelogin)
 }
 
 // OptionFlags2
@@ -893,6 +904,8 @@ func dialConnection(ctx context.Context, c *Connector, p connectParams) (conn ne
 
 func connect(ctx context.Context, c *Connector, log optionalLogger, p connectParams) (res *tdsSession, err error) {
 	dialCtx := ctx
+	connectInterceptor := ConnectInterceptorFromContext(ctx)
+
 	if p.dial_timeout > 0 {
 		var cancel func()
 		dialCtx, cancel = context.WithTimeout(ctx, p.dial_timeout)
@@ -1009,10 +1022,8 @@ initiate_connection:
 	}
 
 	// Intercept prelogin response and send to secretless
-	if preLoginResponse := ctx.Value(ctxtypes.PreLoginResponseKey); preLoginResponse != nil {
-		// A panic will never occur here unless the calling code is wrong
-		preLoginResponse := preLoginResponse.(chan map[uint8][]byte)
-		preLoginResponse<- fields
+	if connectInterceptor != nil && connectInterceptor.PreLoginResponse != nil {
+		connectInterceptor.PreLoginResponse <- fields
 	}
 
 	// Initialise params
@@ -1023,12 +1034,8 @@ initiate_connection:
 	TypeFlags := p.typeFlags
 
 	// Replaces params with values from the client Login
-	if clientLoginChan := ctx.Value(ctxtypes.ClientLoginKey); clientLoginChan != nil {
-		// A panic will never occur here unless the calling code is wrong
-		// TODO: perhaps there should be a timeout to this
-		//  suppose the channel was forever empty == leak
-		clientLoginRaw := <- clientLoginChan.(chan interface{})
-		clientLogin := clientLoginRaw.(*Login)
+	if connectInterceptor != nil && connectInterceptor.ClientLogin != nil {
+		clientLogin := <- connectInterceptor.ClientLogin
 
 		Database = clientLogin.Database
 		HostName = clientLogin.HostName
@@ -1091,27 +1098,15 @@ initiate_connection:
 			case loginAckStruct:
 				success = true
 				// Intercept loginAck and send to secretless
-				loginAckChan := ctx.Value(ctxtypes.ServerLoginAckKey)
-				if loginAckChan != nil {
-					// A panic will never occur here unless the calling code is wrong
-					loginAckChan.(chan LoginAckStruct) <- LoginAckStruct{LoginAck: token}
+				if connectInterceptor != nil && connectInterceptor.ServerLoginAck != nil {
+					connectInterceptor.ServerLoginAck <- LoginAckStruct{LoginAck: token}
 				}
 				sess.loginAck = token
 			case error:
-				return nil, fmt.Errorf("Login error: %s", token.Error())
+				return nil, errs.Wrap(token, "Login error")
 			case doneStruct:
 				if token.isError() {
-					loginError := token.getError()
-					// Intercept error response and send to secretless
-					loginErrorChan := ctx.Value(ctxtypes.ServerErrorKey)
-					if loginErrorChan != nil {
-						// A panic will never occur here unless the calling code is wrong
-
-						// pass the raw error because it is of type Error
-						loginErrorChan.(chan Error) <- loginError
-					}
-
-					return nil, fmt.Errorf("Login error: %s", loginError)
+					return nil, errs.Wrap(token.getError(), "Login error")
 				}
 				goto loginEnd
 			}
@@ -1121,6 +1116,8 @@ loginEnd:
 	if !success {
 		return nil, fmt.Errorf("Login failed")
 	}
+	// TODO: how do we handle multiple jumps to initiate_connection
+	//   the interceptor is currently designed for a single round
 	if sess.routedServer != "" {
 		toconn.Close()
 		p.host = sess.routedServer
