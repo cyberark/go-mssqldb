@@ -287,4 +287,3 @@ Use the native "@Name" parameters instead with the "sqlserver" driver name.
 To fix SQL Server 2008 R2 issue, install SQL Server 2008 R2 Service Pack 2.
 To fix SQL Server 2008 issue, install Microsoft SQL Server 2008 Service Pack 3 and Cumulative update package 3 for SQL Server 2008 SP3.
 More information: http://support.microsoft.com/kb/2653857
-
