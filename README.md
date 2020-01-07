@@ -7,6 +7,7 @@
 ## Install
 
 Requires Go 1.8 or above.
+TEMP STUFF
 
 Install with `go get github.com/denisenkom/go-mssqldb` .
 
