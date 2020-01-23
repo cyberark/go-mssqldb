@@ -403,6 +403,10 @@ func ucs22str(s []byte) (string, error) {
 	return string(utf16.Decode(buf)), nil
 }
 
+func ManglePassword(password string) []byte {
+	return manglePassword(password)
+}
+
 func manglePassword(password string) []byte {
 	var ucs2password []byte = str2ucs2(password)
 	for i, ch := range ucs2password {
@@ -584,10 +588,13 @@ func ReadLoginRequest(_r io.ReadWriteCloser) (*LoginRequest, error) {
 		return nil, err
 	}
 
-	password, err := readUcs2FromTds(r, int(hdr.PasswordLength), hdr.PasswordOffset)
+	r.rpos = offsetAfterHeader(hdr.PasswordOffset)
+	passwordBytes := make([]byte, int(hdr.PasswordLength) * 2)
+	_, err = r.Read(passwordBytes)
 	if err != nil {
 		return nil, err
 	}
+	password := string(passwordBytes)
 
 	appname, err := readUcs2FromTds(r, int(hdr.AppNameLength), hdr.AppNameOffset)
 	if err != nil {
@@ -1105,11 +1112,16 @@ initiate_connection:
 	}
 
 	// Initialise params
-	Database := p.database
-	HostName := p.workstation
-	ServerName := p.host
-	AppName := p.appname
-	TypeFlags := p.typeFlags
+	login := login{
+		TDSVersion:   verTDS74,
+		PacketSize:   uint32(outbuf.PackageSize()),
+		Database:     p.database,
+		OptionFlags2: fODBC, // to get unlimited TEXTSIZE
+		HostName:     p.workstation,
+		ServerName:   p.host,
+		AppName:      p.appname,
+		TypeFlags:    p.typeFlags,
+	}
 
 	// Replaces params with values from the client LoginRequest
 	if connectInterceptor != nil && connectInterceptor.ClientLoginRequest != nil {
@@ -1118,23 +1130,28 @@ initiate_connection:
 			return nil, errors.New("Login error: ClientLoginRequest is nil")
 		}
 
-		Database = clientLoginRequest.Database
-		HostName = clientLoginRequest.HostName
-		ServerName = clientLoginRequest.ServerName
-		AppName = clientLoginRequest.AppName
-		TypeFlags = clientLoginRequest.TypeFlags
+		login.TDSVersion = clientLoginRequest.TDSVersion
+		login.PacketSize = clientLoginRequest.PacketSize
+		login.ClientProgVer = clientLoginRequest.ClientProgVer
+		login.ClientPID = clientLoginRequest.ClientPID
+		login.ConnectionID = clientLoginRequest.ConnectionID
+		login.TypeFlags = clientLoginRequest.TypeFlags
+		login.ClientTimeZone = clientLoginRequest.ClientTimeZone
+		login.ClientLCID = clientLoginRequest.ClientLCID
+		login.HostName = clientLoginRequest.HostName
+		login.UserName = clientLoginRequest.UserName
+		login.Password = clientLoginRequest.Password
+		login.AppName = clientLoginRequest.AppName
+		login.ServerName = clientLoginRequest.ServerName
+		login.CtlIntName = clientLoginRequest.CtlIntName
+		login.Language = clientLoginRequest.Language
+		login.Database = clientLoginRequest.Database
+		login.ClientID = clientLoginRequest.ClientID
+		login.SSPI = clientLoginRequest.SSPI
+		login.AtchDBFile = clientLoginRequest.AtchDBFile
+		login.ChangePassword = clientLoginRequest.ChangePassword
 	}
 
-	login := login{
-		TDSVersion:   verTDS74,
-		PacketSize:   uint32(outbuf.PackageSize()),
-		Database:     Database,
-		OptionFlags2: fODBC, // to get unlimited TEXTSIZE
-		HostName:     HostName,
-		ServerName:   ServerName,
-		AppName:      AppName,
-		TypeFlags:    TypeFlags,
-	}
 	auth, auth_ok := getAuth(p.user, p.password, p.serverSPN, p.workstation)
 	if auth_ok {
 		login.SSPI, err = auth.InitialBytes()
