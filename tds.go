@@ -1049,6 +1049,15 @@ initiate_connection:
 		PreloginTHREADID:   {0, 0, 0, 0},
 		PreloginMARS:       {0}, // MARS disabled
 	}
+	// Intercept prelogin response and send to secretless
+	if connectInterceptor != nil && connectInterceptor.ClientPreLoginRequest != nil {
+		clientFields := <-connectInterceptor.ClientPreLoginRequest
+		for key, value := range clientFields {
+			fields[key] = value
+		}
+
+		fields[PreloginENCRYPTION] = []byte{encrypt}
+	}
 
 	err = writePrelogin(outbuf, fields)
 	if err != nil {
@@ -1130,12 +1139,22 @@ initiate_connection:
 			return nil, errors.New("Login error: ClientLoginRequest is nil")
 		}
 
+		// TODO: TDSVersion is tricky because the client could have a different version
+		//  to go-mssqldb. We want the handshake to use the go-mssqldb version then after
+		//  that it should use the client's version.
 		login.TDSVersion = clientLoginRequest.TDSVersion
 		login.PacketSize = clientLoginRequest.PacketSize
+		outbuf.ResizeBuffer(int(login.PacketSize))
+
 		login.ClientProgVer = clientLoginRequest.ClientProgVer
 		login.ClientPID = clientLoginRequest.ClientPID
 		login.ConnectionID = clientLoginRequest.ConnectionID
+		// CALLOUT: OptionFlags1 is one of the sources of the jdbc issues
+		login.OptionFlags1 = clientLoginRequest.OptionFlags1
+		login.OptionFlags2 = clientLoginRequest.OptionFlags2
 		login.TypeFlags = clientLoginRequest.TypeFlags
+		// TODO: understand why setting this seems to break things
+		//login.OptionFlags3 = clientLoginRequest.OptionFlags3
 		login.ClientTimeZone = clientLoginRequest.ClientTimeZone
 		login.ClientLCID = clientLoginRequest.ClientLCID
 		login.HostName = clientLoginRequest.HostName
@@ -1167,6 +1186,14 @@ initiate_connection:
 	err = sendLogin(outbuf, login)
 	if err != nil {
 		return nil, err
+	}
+
+	// CALLOUT: this was one of the sources of the jdbc issues
+	// NOTE: this means that we pass on the client login request and call it a day
+	// the rest of the auth negotiation takes place out of this method
+	// (within a duplex pipe)
+	if connectInterceptor != nil {
+		return &sess, nil
 	}
 
 	// processing login response
@@ -1226,4 +1253,65 @@ loginEnd:
 		goto initiate_connection
 	}
 	return &sess, nil
+}
+
+func ServerUpgradeToTLSForLogin(
+	_w net.Conn,
+) (*TdsBuffer, net.Conn, error) {
+	var tlsConfig tls.Config
+	certPem := []byte(`-----BEGIN CERTIFICATE-----
+MIIBhTCCASugAwIBAgIQIRi6zePL6mKjOipn+dNuaTAKBggqhkjOPQQDAjASMRAw
+DgYDVQQKEwdBY21lIENvMB4XDTE3MTAyMDE5NDMwNloXDTE4MTAyMDE5NDMwNlow
+EjEQMA4GA1UEChMHQWNtZSBDbzBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABD0d
+7VNhbWvZLWPuj/RtHFjvtJBEwOkhbN/BnnE8rnZR8+sbwnc/KhCk3FhnpHZnQz7B
+5aETbbIgmuvewdjvSBSjYzBhMA4GA1UdDwEB/wQEAwICpDATBgNVHSUEDDAKBggr
+BgEFBQcDATAPBgNVHRMBAf8EBTADAQH/MCkGA1UdEQQiMCCCDmxvY2FsaG9zdDo1
+NDUzgg4xMjcuMC4wLjE6NTQ1MzAKBggqhkjOPQQDAgNIADBFAiEA2zpJEPQyz6/l
+Wf86aX6PepsntZv2GYlA5UpabfT2EZICICpJ5h/iI+i341gBmLiAFQOyTDT+/wQc
+6MF9+Yw1Yy0t
+-----END CERTIFICATE-----`)
+	keyPem := []byte(`-----BEGIN EC PRIVATE KEY-----
+MHcCAQEEIIrYSSNQFaA2Hwf1duRSxKtLYX5CB04fSeQ6tF1aY/PuoAoGCCqGSM49
+AwEHoUQDQgAEPR3tU2Fta9ktY+6P9G0cWO+0kETA6SFs38GecTyudlHz6xvCdz8q
+EKTcWGekdmdDPsHloRNtsiCa697B2O9IFA==
+-----END EC PRIVATE KEY-----`)
+	cert, err := tls.X509KeyPair(certPem, keyPem)
+	if err != nil {
+		panic(err)
+	}
+
+	tlsConfig.Certificates = []tls.Certificate{cert}
+
+	tlsConfig.InsecureSkipVerify = true
+	// fix for https://github.com/denisenkom/go-mssqldb/issues/166
+	// Go implementation of TLS payload size heuristic algorithm splits single TDS package to multiple TCP segments,
+	// while SQL Server seems to expect one TCP segment per encrypted TDS package.
+	// Setting DynamicRecordSizingDisabled to true disables that algorithm and uses 16384 bytes per TLS package
+	tlsConfig.DynamicRecordSizingDisabled = true
+	// setting up connection handler which will allow wrapping of TLS handshake packets inside TDS stream
+
+	outbuf := NewIdempotentDefaultTdsBuffer(_w)
+
+	handshakeConn := tlsHandshakeConn{buf: outbuf}
+	passthrough := passthroughConn{c: &handshakeConn}
+	tlsConn := tls.Server(&passthrough, &tlsConfig)
+
+	err = tlsConn.Handshake()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// this ensures the last write gets flushed
+	err = handshakeConn.buf.FinishPacket()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	passthrough.c = _w
+	outbuf.transport = tlsConn
+	outbuf.afterFirst = func() {
+		outbuf.transport = _w
+	}
+
+	return outbuf, tlsConn, nil
 }

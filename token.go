@@ -453,6 +453,7 @@ func parseSSPIMsg(r *TdsBuffer) sspiMsg {
 // outside world while minimising changes to code.
 type LoginResponse struct {
 	loginAckStruct
+	allTokens []byte
 }
 
 type loginAckStruct struct {

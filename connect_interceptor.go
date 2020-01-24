@@ -10,6 +10,8 @@ const connectInterceptorKey contextKey = "connectInterceptor"
 // ConnectInterceptor is used to exchange values between the driver and the user during
 // the connection phase
 type ConnectInterceptor struct {
+	// ClientPreLoginRequest is used to pass the client PreLogin Request
+	ClientPreLoginRequest chan map[uint8][]byte
 	// ServerPreLoginResponse is used to obtain PreLogin Response fields
 	ServerPreLoginResponse chan map[uint8][]byte
 	// ClientLoginRequest is used to pass the client LoginRequest
@@ -21,6 +23,8 @@ type ConnectInterceptor struct {
 // NewConnectInterceptor is a constructor for a blank ConnectInterceptor
 func NewConnectInterceptor() *ConnectInterceptor {
 	return &ConnectInterceptor{
+		// Create a channel for sending the client pre login to the driver through the context
+		ClientPreLoginRequest: make(chan map[uint8][]byte),
 		// Create a channel for receiving the prelogin response through the context
 		ServerPreLoginResponse: make(chan map[uint8][]byte),
 		// Create a channel for sending the client login to the driver through the context
