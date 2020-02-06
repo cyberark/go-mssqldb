@@ -1,4 +1,4 @@
-name: Go
+name: Test
 on: [push]
 jobs:
 
@@ -17,4 +17,4 @@ jobs:
       uses: actions/checkout@v2
 
     - name: Test
-      run: go test ./...
+      run: go test -v ./...
