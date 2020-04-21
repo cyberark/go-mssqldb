@@ -1171,6 +1171,10 @@ initiate_connection:
 		passthrough.c = toconn
 		outbuf.transport = tlsConn
 		if err != nil {
+			hErr, ok := err.(x509.HostnameError) 
+			if ok && strings.HasPrefix(hErr.Error(), "x509: certificate is valid for") {
+				err = fmt.Errorf("certificate is not valid for hostname")
+			}
 			return nil, fmt.Errorf("TLS Handshake failed: %v", err)
 		}
 		if encrypt == EncryptOff {
