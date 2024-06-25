@@ -1131,13 +1131,11 @@ initiate_connection:
 			certs.AppendCertsFromPEM([]byte(p.rawCertificate))
 			config.RootCAs = certs
 		}
-		/* #nosec */
 		if p.trustServerCertificate {
-			config.InsecureSkipVerify = true
+			config.InsecureSkipVerify = true // #nosec
 		}
-		/* #nosec */
 		if p.disableVerifyHostname {
-			config.InsecureSkipVerify = true
+			config.InsecureSkipVerify = true // #nosec
 		}
 		config.ServerName = p.hostInCertificate
 		// fix for https://github.com/denisenkom/go-mssqldb/issues/166
