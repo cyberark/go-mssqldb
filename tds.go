@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
+	"os"
 	"net"
 	"sort"
 	"strconv"
@@ -257,7 +257,7 @@ func readPreloginWithPacketType(
 	if err != nil {
 		return nil, err
 	}
-	struct_buf, err := ioutil.ReadAll(r)
+	struct_buf, err := io.ReadAll(r)
 	if err != nil {
 		return nil, err
 	}
@@ -1119,7 +1119,7 @@ initiate_connection:
 	if encrypt != EncryptNotSup {
 		var config tls.Config
 		if p.certificate != "" {
-			pem, err := ioutil.ReadFile(p.certificate)
+			pem, err := os.ReadFile(p.certificate)
 			if err != nil {
 				return nil, fmt.Errorf("Cannot read certificate %q: %v", p.certificate, err)
 			}
