@@ -34,6 +34,7 @@ func TestSendLogin(t *testing.T) {
 		OptionFlags3:   8,
 		HostName:       "subdev1",
 		UserName:       "test",
+		// file deepcode ignore HardcodedPassword/test: This is a test file
 		Password:       "testpwd",
 		AppName:        "appname",
 		ServerName:     "servername",
@@ -72,6 +73,7 @@ func TestSendLogin(t *testing.T) {
 
 func TestReadLogin(t *testing.T) {
 	fail := func (name string, expected, actual interface{}) {
+		// file deepcode ignore ClearTextLogging/test: This is a test file
 		fmt.Println("Expected:", expected)
 		fmt.Println("Returned:", actual)
 		t.Errorf("input output don't match for %s", name)
