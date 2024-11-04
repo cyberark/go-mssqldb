@@ -1,3 +1,4 @@
+//go:build !windows
 // +build !windows
 
 package mssql
@@ -188,6 +189,7 @@ func clientChallenge() (nonce [8]byte) {
 
 func ntlmSessionResponse(clientNonce [8]byte, serverChallenge [8]byte, password string) [24]byte {
 	var sessionHash [16]byte
+	// deepcode ignore InsecureHash: This is necessary for legacy support
 	h := md5.New()
 	h.Write(serverChallenge[:])
 	h.Write(clientNonce[:])

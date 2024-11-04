@@ -1132,9 +1132,11 @@ initiate_connection:
 			config.RootCAs = certs
 		}
 		if p.trustServerCertificate {
+			// deepcode ignore TooPermissiveTrustManager: This is disabled by default
 			config.InsecureSkipVerify = true // #nosec
 		}
 		if p.disableVerifyHostname {
+			// deepcode ignore TooPermissiveTrustManager: This is disabled by default
 			config.InsecureSkipVerify = true // #nosec
 		}
 		config.ServerName = p.hostInCertificate
