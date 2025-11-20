@@ -1,11 +1,11 @@
 module github.com/denisenkom/go-mssqldb
 
-go 1.20
+go 1.24.0
 
 require (
 	github.com/golang-sql/civil v0.0.0-20190719163853-cb61b32ac6fe
 	github.com/pkg/errors v0.9.1
-	golang.org/x/crypto v0.31.0
+	golang.org/x/crypto v0.45.0
 )
 
 replace golang.org/x/crypto v0.0.0-20190308221718-c2843e01d9a2 => golang.org/x/crypto v0.9.0
