@@ -136,7 +136,7 @@ func (b *Bulk) sendBulkCommand(ctx context.Context) (err error) {
 	if err != nil {
 		return fmt.Errorf("Prepare failed: %s", err.Error())
 	}
-	b.dlogf(query)
+	b.dlogf("%s", query)
 
 	_, err = stmt.(*Stmt).ExecContext(ctx, nil)
 	if err != nil {
